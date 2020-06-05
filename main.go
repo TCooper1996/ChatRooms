@@ -7,20 +7,22 @@ import (
 	"net"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
 const userLimit = 16
 const privateMessageLimit = 16
+const messageChannelLimit = 32
 const chatHistoryThreshold = 32
 const admin = "admin"
 const adminFormatting = "\r%s\n$: "
-const userFormatting = "\r%s\n"
+const userFormatting = "\r%s\n[%s] %s: "
 
-var userCounter uint32
+//var userCounter uint32
+
 var userGroup map[string]user
 var messageChannel chan message
+var broadcastChannel chan string
 var roomGroup map[string]*room
 var signalChan chan serverSignal
 var currentRoom string
@@ -28,56 +30,65 @@ var currentRoom string
 func main() {
 	var connections = make(chan net.Conn)
 	messageChannel = make(chan message, 10)
-	var console = make(chan string)
+	broadcastChannel = make(chan string)
+	//var console = make(chan string)
 	userGroup = make(map[string]user)
 	roomGroup = make(map[string]*room)
 	signalChan = make(chan serverSignal)
 	roomGroup["main"] = &room{name: "main", users: make([]string, 0), chatHistory: make([]string, 0)}
 	currentRoom = "main"
 
-	//userGroup["admin"] = user{
-	//	uName:           "admin",
-	//	uID:             0,
-	//	connection:      nil,
-	//	privateMessages: make(chan []string, privateMessageLimit),
-	//	currentRoom:     "main",
-	//}
+	userGroup["admin"] = user{
+		uName:           "admin",
+		uID:             0,
+		connection:      nil,
+		privateMessages: make(chan []string, privateMessageLimit),
+		currentRoom:     "main",
+	}
 
 	fmt.Println("Starting server")
 
 	go ManageConnections(&connections)
-	go ManageConsole(&console)
+	go ManageConsole()
 
 	for {
 		select {
+		case msg := <-broadcastChannel:
+
+			for _, room := range roomGroup {
+				modMsg := fmt.Sprintf("[Server Broadcast]: %s", msg)
+				adminMessage := formatMessageAdmin(modMsg)
+				logMessage := formatMessageLog(modMsg)
+
+				logToFile(room.name, logMessage)
+
+				for _, u := range userGroup {
+					if u.uName == admin {
+						fmt.Print(adminMessage)
+					} else {
+						userMessage := formatMessageUser(modMsg, u.uName)
+						u.connection.Write([]byte(userMessage))
+					}
+				}
+			}
+
 		case msg := <-messageChannel:
 
 			user := userGroup[msg.username]
 			modMsg := fmt.Sprintf("[%s] %s: %s", user.currentRoom, user.uName, msg.m)
-			adminMessage := fmt.Sprintf(adminFormatting, modMsg)
-			userMessage := fmt.Sprintf(userFormatting, modMsg)
-			logMessage := fmt.Sprintf(modMsg + string('\n'))
-			room := roomGroup[msg.room]
-			room.chatHistory = append(room.chatHistory, logMessage)
-			room.chatBytes += len([]byte(logMessage))
-			if room.chatBytes >= chatHistoryThreshold {
-				fmt.Printf(adminFormatting, "Writing chat history to disk.")
-				f := openHistoryFile(room.name, true)
-				for _, line := range room.chatHistory {
-					f.WriteString(line)
-				}
-				f.Close()
-				room.chatHistory = make([]string, 0)
-				room.chatBytes = 0
-			}
+			adminMessage := formatMessageAdmin(modMsg) //, userMessage, logMessage := formatMessage(modMsg)
+			logMessage := formatMessageLog(modMsg)
 
-			for _, u := range userGroup {
-				if user.uName != u.uName {
-					(u.connection).Write([]byte(userMessage))
+			logToFile(msg.room, logMessage)
+
+			for _, u := range roomGroup[msg.room].users {
+				if user.uName != u {
+					userMessage := formatMessageUser(modMsg, u)
+					userGroup[u].connection.Write([]byte(userMessage))
 				}
 			}
 
-			if currentRoom == msg.room {
+			if currentRoom == msg.room && user.uName != admin {
 				fmt.Print(adminMessage)
 
 			}
@@ -104,12 +115,14 @@ func ManageConnections(cons *chan net.Conn) {
 		if err != nil {
 			fmt.Println(err)
 		}
+		if userCounter >= userLimit {
+			fmt.Printf("Rejecting incoming connection, user limit reached %d", userLimit)
+			con.Close()
+			continue
+		}
 		fmt.Printf(adminFormatting, "New connection")
-		//con.Write([]byte("Hello"))
 
 		go CreateUser(con)
-		//*cons <- con
-
 	}
 }
 
@@ -123,9 +136,9 @@ func CreateUser(con net.Conn) {
 	if err != nil {
 		log.Fatalln("Error during user creation: " + err.Error())
 	}
-	user := user{in, userCounter, con, make(chan []string, privateMessageLimit), "main"}
+	user := newUser(in, con)
 	userGroup[in] = user
-	atomic.AddUint32(&userCounter, 1)
+	roomGroup["main"].users = append(roomGroup["main"].users, user.uName)
 	go ManageUser(user)
 }
 
@@ -136,7 +149,7 @@ func ManageUser(u user) {
 	for {
 		u.connection.Write([]byte(fmt.Sprintf("[%s] You: ", u.currentRoom)))
 		in, err := r.ReadString('\n')
-		in = strings.TrimRight(in, "\n")
+		in = strings.TrimRight(in, "\r\n")
 		if err != nil {
 			log.Fatalln("Error while receiving user input: " + err.Error())
 		}
@@ -153,16 +166,17 @@ func ManageUser(u user) {
 }
 
 //ManageConsole handles the administrative console for managing various chatrooms and users.
-func ManageConsole(cons *chan string) {
+func ManageConsole() {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("$: ")
 	for {
 		text, _ := reader.ReadString('\n')
+		text = strings.TrimRight(text, "\n")
 		words := strings.Split(strings.TrimRight(text, "\n"), " ")
 
 		switch words[0] {
 		case "/all":
-			messageChannel <- message{m: text[4:], username: admin}
+			broadcastChannel <- text[5:]
 		case "/quit":
 			for _, u := range userGroup {
 				if u.connection != nil {
@@ -215,6 +229,38 @@ func ManageConsole(cons *chan string) {
 			fmt.Sprintf(adminFormatting, string(roomGroup[currentRoom].chatBytes))
 		}
 
+	}
+
+}
+
+func formatMessageAdmin(m string) string {
+	return fmt.Sprintf(adminFormatting, m) //, fmt.Sprintf(userFormatting, m) + "[%s] %s: ", fmt.Sprintf(m + string('\n'))
+}
+
+func formatMessageLog(m string) string {
+	return m + string('\n')
+}
+
+func formatMessageUser(m string, user string) string {
+	userStruct := userGroup[user]
+	return fmt.Sprintf(userFormatting, m, userStruct.currentRoom, userStruct.uName)
+}
+
+//logToFile adds the message to the cached history, and if the size of the history is beyond a constant threshold,
+//opens up the file containing the history of the current channel, writes the cached data to it, and empties the cache.
+func logToFile(name string, logMessage string) {
+	room := roomGroup[name]
+	room.chatHistory = append(room.chatHistory, logMessage)
+	room.chatBytes += len([]byte(logMessage))
+	if room.chatBytes >= chatHistoryThreshold {
+		fmt.Printf(adminFormatting, "Writing chat history to disk.")
+		f := openHistoryFile(room.name, true)
+		for _, line := range room.chatHistory {
+			f.WriteString(line)
+		}
+		f.Close()
+		room.chatHistory = make([]string, 0)
+		room.chatBytes = 0
 	}
 
 }
