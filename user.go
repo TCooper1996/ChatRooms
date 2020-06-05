@@ -6,5 +6,6 @@ type user struct {
 	uName           string
 	uID             uint32
 	connection      net.Conn
-	privateMessages chan string
+	privateMessages chan []string
+	currentRoom string
 }

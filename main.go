@@ -11,19 +11,32 @@ import (
 )
 
 const userLimit = 16
+const privateMessageLimit = 16
 
 var userCounter uint32
-var userGroup []user
-var msgs chan string
+var userGroup map[string]user
+var messageChannel chan message
+var roomGroup map[string]room
 
 func main() {
-
 	var connections = make(chan net.Conn)
-	msgs = make(chan string, 10)
-	//var aconns = make(map[net.Conn]int)
+	messageChannel = make(chan message, 10)
 	var console = make(chan string)
-	userGroup = make([]user, userLimit)
-	//var i int
+	userGroup = make(map[string]user)
+	roomGroup = make(map[string]room)
+	roomGroup["main"] = room{name: "main", users: []user{}}
+
+	//userGroup["admin"] = user{
+	//	uName:           "admin",
+	//	uID:             0,
+	//	connection:      nil,
+	//	privateMessages: make(chan []string, privateMessageLimit),
+		//currentRoom:     "",
+	//}
+
+	var chatHistory = make([]string, 0)
+
+
 
 	fmt.Println("Starting server")
 
@@ -32,12 +45,21 @@ func main() {
 
 	for {
 		select {
-		case msg := <-msgs:
+		case msg := <-messageChannel:
+			//tm.Clear()
+
+			user := userGroup[msg.username]
+			modMsg := fmt.Sprintf("\r[%s] %s: %s\n", user.currentRoom, user.uName, msg.m)
+			chatHistory = append(chatHistory, modMsg)
+
 			for _, u := range userGroup {
-				fmt.Println()
-				(u.connection).Write([]byte(msg))
-				fmt.Println("Message sent")
+				if user.uName != u.uName{
+					(u.connection).Write([]byte(fmt.Sprintf("%s[%s] %s: ", modMsg, u.currentRoom, u.uName)))
+				}
 			}
+
+			fmt.Print(modMsg)
+			fmt.Print("$: ")
 
 		case com := <-console:
 			if strings.TrimRight(com, "\n") == "quit" {
@@ -73,13 +95,14 @@ func ManageConnections(cons *chan net.Conn) {
 func CreateUser(con net.Conn) {
 	rd := bufio.NewReader(con)
 
-	con.Write([]byte("Enter a username.\n"))
+	con.Write([]byte("Enter a username: "))
 	in, err := rd.ReadString('\n')
+	in = strings.TrimRight(in, "\r\n")
 	if err != nil {
 		fmt.Println("Error during user creation.")
 	}
-	user := user{in, userCounter, con, make(chan string, 5)}
-	userGroup = append(userGroup, user)
+	user := user{in, userCounter, con, make(chan []string, privateMessageLimit), "main"}
+	userGroup[in] = user
 	atomic.AddUint32(&userCounter, 1)
 	go ManageUser(user)
 }
@@ -89,7 +112,10 @@ func ManageUser(u user) {
 	u.connection.Write([]byte(fmt.Sprintf("Server Time is: %s\n", time.Now().Format("15:04:05"))))
 	r := bufio.NewReader(u.connection)
 	for {
+		u.connection.Write([]byte(fmt.Sprintf("[%s] You: ", u.currentRoom)))
 		in, err := r.ReadString('\n')
+		in = strings.TrimRight(in, "\n")
+
 		if err != nil {
 			fmt.Println("Error while receiving user input" + err.Error())
 			break
@@ -99,7 +125,7 @@ func ManageUser(u user) {
 		case strings.TrimRight("/quit", "\n"):
 			u.connection.Close()
 		default:
-			msgs <- in
+			messageChannel <- message{m: in, username: u.uName}
 		}
 	}
 
@@ -108,9 +134,17 @@ func ManageUser(u user) {
 //ManageConsole handles the administrative console for managing various chatrooms and users.
 func ManageConsole(cons *chan string) {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Console active")
+	fmt.Print("$: ")
 	for {
 		text, _ := reader.ReadString('\n')
+		words := strings.Split(strings.TrimRight(text, "\n"), " ")
+
+		switch words[0] {
+		case "/all":
+			messageChannel <- message{m: text[4:], username: "admin"}
+		}
+
+
 		*cons <- text
 	}
 
