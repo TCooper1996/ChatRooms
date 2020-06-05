@@ -12,31 +12,33 @@ import (
 
 const userLimit = 16
 const privateMessageLimit = 16
+const chatHistoryThreshold = 10
+const admin = "admin"
 
 var userCounter uint32
 var userGroup map[string]user
 var messageChannel chan message
-var roomGroup map[string]room
+var roomGroup map[string]*room
+var signalChan chan serverSignal
+var currentRoom string
 
 func main() {
 	var connections = make(chan net.Conn)
 	messageChannel = make(chan message, 10)
 	var console = make(chan string)
 	userGroup = make(map[string]user)
-	roomGroup = make(map[string]room)
-	roomGroup["main"] = room{name: "main", users: []user{}}
+	roomGroup = make(map[string]*room)
+	signalChan = make(chan serverSignal)
+	roomGroup["main"] = &room{name: "main", users: make([]string, 0), chatHistory: make([]string, 0)}
+	currentRoom = "main"
 
 	//userGroup["admin"] = user{
 	//	uName:           "admin",
 	//	uID:             0,
 	//	connection:      nil,
 	//	privateMessages: make(chan []string, privateMessageLimit),
-		//currentRoom:     "",
+	//currentRoom:     "",
 	//}
-
-	var chatHistory = make([]string, 0)
-
-
 
 	fmt.Println("Starting server")
 
@@ -46,23 +48,38 @@ func main() {
 	for {
 		select {
 		case msg := <-messageChannel:
-			//tm.Clear()
 
 			user := userGroup[msg.username]
 			modMsg := fmt.Sprintf("\r[%s] %s: %s\n", user.currentRoom, user.uName, msg.m)
-			chatHistory = append(chatHistory, modMsg)
+			room := roomGroup[msg.room]
+			room.chatHistory = append(room.chatHistory, modMsg)
+			room.chatBytes += len([]byte(modMsg))
+			if room.chatBytes >= chatHistoryThreshold {
+				fmt.Println("Writing chat history to disk")
+				f := openHistoryFile(room.name, true)
+				for _, line := range room.chatHistory {
+					f.WriteString(line)
+				}
+				f.Close()
+				room.chatHistory = make([]string, 0)
+				room.chatBytes = 0
+			}
 
 			for _, u := range userGroup {
-				if user.uName != u.uName{
+				if user.uName != u.uName {
 					(u.connection).Write([]byte(fmt.Sprintf("%s[%s] %s: ", modMsg, u.currentRoom, u.uName)))
 				}
 			}
 
-			fmt.Print(modMsg)
-			fmt.Print("$: ")
+			if currentRoom == msg.room {
+				fmt.Print(modMsg)
+				fmt.Print("$: ")
 
-		case com := <-console:
-			if strings.TrimRight(com, "\n") == "quit" {
+			}
+
+		case sig := <-signalChan:
+			switch sig {
+			case Quit:
 				return
 			}
 		}
@@ -115,17 +132,16 @@ func ManageUser(u user) {
 		u.connection.Write([]byte(fmt.Sprintf("[%s] You: ", u.currentRoom)))
 		in, err := r.ReadString('\n')
 		in = strings.TrimRight(in, "\n")
-
 		if err != nil {
-			fmt.Println("Error while receiving user input" + err.Error())
-			break
+			fmt.Println("Error while receiving user input: " + err.Error())
 		}
-
+		fmt.Print(in)
 		switch in {
+
 		case strings.TrimRight("/quit", "\n"):
 			u.connection.Close()
 		default:
-			messageChannel <- message{m: in, username: u.uName}
+			messageChannel <- message{m: in, username: u.uName, room: u.currentRoom}
 		}
 	}
 
@@ -141,11 +157,58 @@ func ManageConsole(cons *chan string) {
 
 		switch words[0] {
 		case "/all":
-			messageChannel <- message{m: text[4:], username: "admin"}
+			messageChannel <- message{m: text[4:], username: admin}
+		case "/quit":
+			for _, u := range userGroup {
+				if u.connection != nil {
+					u.connection.Close()
+				}
+			}
+			signalChan <- Quit
+
+		case "/create":
+			var roomName string
+			if len(words) == 2 {
+				roomName = words[1]
+			} else {
+				var err error
+				roomName, err = reader.ReadString('\n')
+				if err != nil {
+					fmt.Println("Error: " + err.Error())
+				}
+			}
+
+			room := room{name: roomName, users: make([]string, 0), owner: admin}
+			roomGroup[roomName] = &room
+			fmt.Printf("\rRoom %s created\n$: ", roomName)
+
+		case "/switch":
+			var roomName string
+			if len(words) == 2 {
+				roomName = words[1]
+			} else {
+				var err error
+				roomName, err = reader.ReadString('\n')
+				if err != nil {
+					fmt.Println("Error: " + err.Error())
+				}
+			}
+
+			if r, exists := roomGroup[roomName]; exists {
+				currentRoom = r.name
+				fmt.Printf("\rEntering room %s\n$", roomName)
+				f := openHistoryFile(currentRoom, false)
+				s := bufio.NewScanner(f)
+				for s.Scan() {
+					fmt.Println(s.Text())
+				}
+
+			} else {
+				fmt.Print("\rRoom does not exist. Create with /create [room_name]\n$")
+			}
+
 		}
 
-
-		*cons <- text
 	}
 
 }
