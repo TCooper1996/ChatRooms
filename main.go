@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -116,7 +117,7 @@ func CreateUser(con net.Conn) {
 	in, err := rd.ReadString('\n')
 	in = strings.TrimRight(in, "\r\n")
 	if err != nil {
-		fmt.Println("Error during user creation.")
+		log.Fatalln("Error during user creation: " + err.Error())
 	}
 	user := user{in, userCounter, con, make(chan []string, privateMessageLimit), "main"}
 	userGroup[in] = user
@@ -133,7 +134,7 @@ func ManageUser(u user) {
 		in, err := r.ReadString('\n')
 		in = strings.TrimRight(in, "\n")
 		if err != nil {
-			fmt.Println("Error while receiving user input: " + err.Error())
+			log.Fatalln("Error while receiving user input: " + err.Error())
 		}
 		fmt.Print(in)
 		switch in {
@@ -190,7 +191,7 @@ func ManageConsole(cons *chan string) {
 				var err error
 				roomName, err = reader.ReadString('\n')
 				if err != nil {
-					fmt.Println("Error: " + err.Error())
+					log.Println("Error: " + err.Error())
 				}
 			}
 

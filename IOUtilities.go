@@ -10,14 +10,14 @@ func openHistoryFile(roomName string, write bool) *os.File {
 	if write {
 		flags = os.O_APPEND | os.O_WRONLY | os.O_CREATE
 	} else {
-		flags = os.O_RDONLY
+		flags = os.O_RDONLY | os.O_CREATE
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Println("Error: ", err.Error())
 	}
 
-	roomFile := fmt.Sprintf("%s/%s.txt", cwd, currentRoom)
+	roomFile := fmt.Sprintf("%s/%s.txt", cwd, roomName)
 	f, err := os.OpenFile(roomFile, flags, 0644)
 	if err != nil {
 		fmt.Println("Error: ", err.Error())
