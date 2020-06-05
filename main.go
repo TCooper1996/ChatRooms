@@ -13,8 +13,10 @@ import (
 
 const userLimit = 16
 const privateMessageLimit = 16
-const chatHistoryThreshold = 10
+const chatHistoryThreshold = 32
 const admin = "admin"
+const adminFormatting = "\r%s\n$: "
+const userFormatting = "\r%s\n"
 
 var userCounter uint32
 var userGroup map[string]user
@@ -38,7 +40,7 @@ func main() {
 	//	uID:             0,
 	//	connection:      nil,
 	//	privateMessages: make(chan []string, privateMessageLimit),
-	//currentRoom:     "",
+	//	currentRoom:     "main",
 	//}
 
 	fmt.Println("Starting server")
@@ -51,12 +53,15 @@ func main() {
 		case msg := <-messageChannel:
 
 			user := userGroup[msg.username]
-			modMsg := fmt.Sprintf("\r[%s] %s: %s\n", user.currentRoom, user.uName, msg.m)
+			modMsg := fmt.Sprintf("[%s] %s: %s", user.currentRoom, user.uName, msg.m)
+			adminMessage := fmt.Sprintf(adminFormatting, modMsg)
+			userMessage := fmt.Sprintf(userFormatting, modMsg)
+			logMessage := fmt.Sprintf(modMsg + string('\n'))
 			room := roomGroup[msg.room]
-			room.chatHistory = append(room.chatHistory, modMsg)
-			room.chatBytes += len([]byte(modMsg))
+			room.chatHistory = append(room.chatHistory, logMessage)
+			room.chatBytes += len([]byte(logMessage))
 			if room.chatBytes >= chatHistoryThreshold {
-				fmt.Println("Writing chat history to disk")
+				fmt.Printf(adminFormatting, "Writing chat history to disk.")
 				f := openHistoryFile(room.name, true)
 				for _, line := range room.chatHistory {
 					f.WriteString(line)
@@ -68,13 +73,12 @@ func main() {
 
 			for _, u := range userGroup {
 				if user.uName != u.uName {
-					(u.connection).Write([]byte(fmt.Sprintf("%s[%s] %s: ", modMsg, u.currentRoom, u.uName)))
+					(u.connection).Write([]byte(userMessage))
 				}
 			}
 
 			if currentRoom == msg.room {
-				fmt.Print(modMsg)
-				fmt.Print("$: ")
+				fmt.Print(adminMessage)
 
 			}
 
@@ -100,7 +104,7 @@ func ManageConnections(cons *chan net.Conn) {
 		if err != nil {
 			fmt.Println(err)
 		}
-		fmt.Println("New connection")
+		fmt.Printf(adminFormatting, "New connection")
 		//con.Write([]byte("Hello"))
 
 		go CreateUser(con)
@@ -197,7 +201,7 @@ func ManageConsole(cons *chan string) {
 
 			if r, exists := roomGroup[roomName]; exists {
 				currentRoom = r.name
-				fmt.Printf("\rEntering room %s\n$", roomName)
+				fmt.Printf("\rEntering room %s\n$: ", roomName)
 				f := openHistoryFile(currentRoom, false)
 				s := bufio.NewScanner(f)
 				for s.Scan() {
@@ -205,9 +209,10 @@ func ManageConsole(cons *chan string) {
 				}
 
 			} else {
-				fmt.Print("\rRoom does not exist. Create with /create [room_name]\n$")
+				fmt.Printf(adminFormatting, "Room does not exist. Create with /create [room_name]")
 			}
-
+		case "/memcount":
+			fmt.Sprintf(adminFormatting, string(roomGroup[currentRoom].chatBytes))
 		}
 
 	}
