@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"strings"
-	"time"
 )
 
 const userLimit = 16
@@ -48,8 +46,9 @@ func main() {
 
 	fmt.Println("Starting server")
 
+	initializeCommands()
 	go ManageConnections(&connections)
-	go ManageConsole()
+	go userGroup["admin"].ManageUser()
 
 	for {
 		select {
@@ -139,98 +138,7 @@ func CreateUser(con net.Conn) {
 	user := newUser(in, con)
 	userGroup[in] = user
 	roomGroup["main"].users = append(roomGroup["main"].users, user.uName)
-	go ManageUser(user)
-}
-
-//ManageUser manages the main interactive loop of each user.
-func ManageUser(u user) {
-	u.connection.Write([]byte(fmt.Sprintf("Server Time is: %s\n", time.Now().Format("15:04:05"))))
-	r := bufio.NewReader(u.connection)
-	for {
-		u.connection.Write([]byte(fmt.Sprintf("[%s] You: ", u.currentRoom)))
-		in, err := r.ReadString('\n')
-		in = strings.TrimRight(in, "\r\n")
-		if err != nil {
-			log.Fatalln("Error while receiving user input: " + err.Error())
-		}
-		fmt.Print(in)
-		switch in {
-
-		case strings.TrimRight("/quit", "\n"):
-			u.connection.Close()
-		default:
-			messageChannel <- message{m: in, username: u.uName, room: u.currentRoom}
-		}
-	}
-
-}
-
-//ManageConsole handles the administrative console for managing various chatrooms and users.
-func ManageConsole() {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("$: ")
-	for {
-		text, _ := reader.ReadString('\n')
-		text = strings.TrimRight(text, "\n")
-		words := strings.Split(strings.TrimRight(text, "\n"), " ")
-
-		switch words[0] {
-		case "/all":
-			broadcastChannel <- text[5:]
-		case "/quit":
-			for _, u := range userGroup {
-				if u.connection != nil {
-					u.connection.Close()
-				}
-			}
-			signalChan <- Quit
-
-		case "/create":
-			var roomName string
-			if len(words) == 2 {
-				roomName = words[1]
-			} else {
-				var err error
-				roomName, err = reader.ReadString('\n')
-				if err != nil {
-					fmt.Println("Error: " + err.Error())
-				}
-			}
-
-			room := room{name: roomName, users: make([]string, 0), owner: admin}
-			roomGroup[roomName] = &room
-			fmt.Printf("\rRoom %s created\n$: ", roomName)
-
-		case "/switch":
-			var roomName string
-			if len(words) == 2 {
-				roomName = words[1]
-			} else {
-				var err error
-				roomName, err = reader.ReadString('\n')
-				if err != nil {
-					log.Println("Error: " + err.Error())
-				}
-			}
-
-			if r, exists := roomGroup[roomName]; exists {
-				currentRoom = r.name
-				fmt.Printf("\rEntering room %s\n$: ", roomName)
-				f := openHistoryFile(currentRoom, false)
-				s := bufio.NewScanner(f)
-				for s.Scan() {
-					fmt.Println(s.Text())
-				}
-
-			} else {
-				fmt.Printf(adminFormatting, "Room does not exist. Create with /create [room_name]")
-			}
-		case "/memcount":
-			fmt.Sprintf(adminFormatting, string(roomGroup[currentRoom].chatBytes))
-		}
-
-	}
-
+	go user.ManageUser()
 }
 
 func formatMessageAdmin(m string) string {
