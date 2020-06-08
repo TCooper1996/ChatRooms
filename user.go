@@ -56,6 +56,17 @@ func (u *user) Writef(format string, s ...string) {
 	u.Write(fmt.Sprintf(format, s))
 }
 
+func (u *user) WriteRaw(data string) {
+	if _, err := u.writer.WriteString(data); err != nil {
+		log.Println("Error writing to user: " + err.Error())
+	}
+
+	if err := u.writer.Flush(); err != nil {
+		log.Println("Error flushing: " + err.Error())
+	}
+
+}
+
 func (u *user) WritePrompt() {
 	if _, err := u.writer.WriteString(fmt.Sprintf("\r[%s] %s: ", u.currentRoom, u.uName)); err != nil {
 		log.Println("Error writing user prompt: " + err.Error())
@@ -72,7 +83,7 @@ func (u *user) ManageUser() {
 	for {
 		u.WritePrompt()
 		text, _ := u.reader.ReadString('\n')
-		text = strings.TrimRight(text, "\n")
+		text = strings.TrimRight(text, "\r\n")
 
 		// If the first character is a '/', it is a command. Otherwise, it is a message
 		if text[0] == '/' {

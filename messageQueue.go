@@ -32,7 +32,7 @@ type messageQueue struct {
 	count    int
 }
 
-func (q messageQueue) Push(m string) error {
+func (q *messageQueue) Push(m string) error {
 	m = strings.TrimRight(m, "\n") + string('\n')
 	byteCount := len([]byte(m))
 	if byteCount > maxMessageSize {
@@ -67,7 +67,7 @@ func (q messageQueue) Push(m string) error {
 }
 
 //Range returns the contents of the queue
-func (q messageQueue) Range() []string {
+func (q *messageQueue) Range() []string {
 	arr := make([]string, q.count)
 	n := q.head
 	for i := 0; i < q.count; i++ {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"strings"
@@ -88,6 +87,7 @@ func create(u *user, words []string) {
 		r := newRoom(words[1], u.uName)
 		roomGroup[words[1]] = &r
 		atomic.AddUint32(&roomCounter, 1)
+		u.Writef("Room %s created.", words[1])
 	}
 }
 
@@ -97,17 +97,17 @@ func switchRoom(u *user, words []string) {
 		return
 	}
 
-	if _, exists := roomGroup[words[1]]; exists {
-		u.currentRoom = words[1]
-		u.Write(fmt.Sprintf("Entering room %s", u.currentRoom))
+	if r, exists := roomGroup[words[1]]; exists {
+		r.AddUser(u.uName)
 
-		f := openHistoryFile(u.currentRoom, false)
-		s := bufio.NewScanner(f)
+		u.WriteRaw(fmt.Sprintf("Entering room %s\n", u.currentRoom))
+
 		//todo: Consider sending more than just one line per packet
-		for s.Scan() {
-			u.Write(s.Text())
+		for _, m := range r.chatHistory.Range() {
+			u.WriteRaw(m)
 		}
-		roomGroup[u.currentRoom].users = append(roomGroup[u.currentRoom].users, u.uName)
+		u.WritePrompt()
+
 	} else {
 		u.Write("Room does not exist.")
 	}
