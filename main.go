@@ -141,7 +141,7 @@ func initializeLogger() {
 		return
 	}
 
-	f, err := os.OpenFile(path.Join(cwd, "ChatRooms_logger."), os.O_WRONLY|os.O_CREATE, 0755)
+	f, err := os.OpenFile(path.Join(cwd, "ChatRooms_logger"), os.O_WRONLY|os.O_CREATE, 0755)
 	if err != nil {
 		fmt.Printf("Error creating logger file: %s", err.Error())
 		return
