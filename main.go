@@ -13,7 +13,7 @@ import (
 const privateMessageLimit = 16
 const serverName = "server"
 
-var userGroup map[string]user
+var userGroup map[string]*user
 var messageChannel chan message
 var broadcastChannel chan string
 var roomGroup map[string]*room
@@ -25,18 +25,18 @@ var server user
 func main() {
 	messageChannel = make(chan message, 10)
 	broadcastChannel = make(chan string)
-	userGroup = make(map[string]user)
+	userGroup = make(map[string]*user)
 	roomGroup = make(map[string]*room)
 	signalChan = make(chan serverSignal)
 	roomGroup["main"] = &room{name: "main", users: make([]string, 0)}
 
-	server = newUser(serverName, nil)
+	server = *newUser(serverName, nil)
 
 	fmt.Println("Starting server")
 	initializeLogger()
 	initializeCommands()
 	go ManageConnections()
-	go userGroup[serverName].ManageUser()
+	go server.ManageUser()
 
 	for {
 		select {
@@ -58,9 +58,9 @@ func main() {
 
 			cacheMessage(modMsg, msg.room)
 
-			for _, u := range roomGroup[msg.room].users {
-				if user.uName != u {
-					userGroup[u].Write(modMsg)
+			for _, u := range roomGroup[msg.room].Range() {
+				if user != u {
+					u.Write(modMsg)
 				}
 			}
 

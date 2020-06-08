@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -20,63 +21,67 @@ type user struct {
 	privateMessages chan []string
 	currentRoom     string
 	admin           bool
+	writer          bufio.Writer
+	reader          bufio.Reader
 }
 
-func newUser(name string, con net.Conn) user {
+func newUser(name string, con net.Conn) *user {
 	c := userCounter
 	atomic.AddUint32(&c, 1)
-	u := user{uName: name, uID: c, connection: con, privateMessages: make(chan []string), currentRoom: "main"}
+	u := &user{uName: name, uID: c, connection: con, privateMessages: make(chan []string), currentRoom: "main"}
 	userGroup[name] = u
 	roomGroup["main"].AddUser(name)
+
+	if name == serverName {
+		u.writer = *bufio.NewWriter(os.Stdout)
+		u.reader = *bufio.NewReader(os.Stdin)
+	} else {
+		u.writer = *bufio.NewWriter(u.connection)
+		u.reader = *bufio.NewReader(u.connection)
+	}
 	return u
 }
 
-func (u user) Write(data string) {
-	if u.uName == serverName {
-		fmt.Printf("\r%s\n[%s] %s: ", data, u.currentRoom, u.uName)
-	} else {
-
-		byteData := []byte(fmt.Sprintf("\r%s\n[%s] %s: ", data, u.currentRoom, u.uName))
-
-		bytesWritten, err := u.connection.Write(byteData)
-		if err != nil {
-			fmt.Println(err.Error())
-		} else if bytesWritten != len(byteData) {
-			fmt.Println("Error, not all bytes written to client.")
-		}
+func (u *user) Write(data string) {
+	_, err := u.writer.WriteString(fmt.Sprintf("\r%s\n[%s] %s:", data, u.currentRoom, u.uName))
+	if err := u.writer.Flush(); err != nil {
+		log.Println("Error Flushing: " + err.Error())
+	}
+	if err != nil {
+		log.Println("Error while writing to user: " + err.Error())
 	}
 }
 
-func (u user) ManageUser() {
-	var reader bufio.Reader
-	var showPrompt = func() func() {
+func (u *user) Writef(format string, s ...string) {
+	u.Write(fmt.Sprintf(format, s))
+}
 
-		if u.uName == serverName {
-			return func() {
-				fmt.Printf("\r[%s] %s: ", u.currentRoom, u.uName)
-				reader = *bufio.NewReader(os.Stdin)
-			}
-		} else {
-			return func() {
-				u.connection.Write([]byte(fmt.Sprintf("\r[%s] %s: ", u.currentRoom, u.uName)))
-				reader = *bufio.NewReader(u.connection)
-			}
-		}
-	}()
+func (u *user) WritePrompt() {
+	if _, err := u.writer.WriteString(fmt.Sprintf("\r[%s] %s: ", u.currentRoom, u.uName)); err != nil {
+		log.Println("Error writing user prompt: " + err.Error())
+	}
+
+	if err := u.writer.Flush(); err != nil {
+		log.Println("Error flushing while writing to user: ", err.Error())
+	}
+
+}
+
+func (u *user) ManageUser() {
 
 	for {
-		showPrompt()
-		text, _ := reader.ReadString('\n')
+		u.WritePrompt()
+		text, _ := u.reader.ReadString('\n')
 		text = strings.TrimRight(text, "\n")
 
 		// If the first character is a '/', it is a command. Otherwise, it is a message
 		if text[0] == '/' {
 			words := strings.Split(text, " ")
-			if c, exists := commandMap[words[1]]; exists {
+			if c, exists := commandMap[words[0]]; exists {
 				if c.adminOnly && !u.admin {
 					u.Write("This function is only available to admins.")
 				} else {
-					c.function(&u, words)
+					c.function(u, words)
 				}
 			} else {
 				u.Write("Unknown command. Try /help")

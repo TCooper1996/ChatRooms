@@ -19,3 +19,11 @@ func (r *room) AddUser(name string) {
 	u := userGroup[name]
 	r.users = append(r.users, u.uName)
 }
+
+func (r room) Range() []*user {
+	arr := make([]*user, len(r.users))
+	for i := 0; i < len(r.users); i++ {
+		arr[i] = userGroup[r.users[i]]
+	}
+	return arr
+}

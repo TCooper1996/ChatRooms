@@ -44,12 +44,20 @@ func initializeCommands() {
 			function:    switchRoom,
 		},
 
-		"/list": {
-			name:        "/list",
+		"/listChannels": {
+			name:        "/listChannels",
 			description: "Lists the name and number of users of each room.",
-			format:      "/list",
+			format:      "/listChannels",
 			adminOnly:   false,
-			function:    list,
+			function:    listChannels,
+		},
+
+		"/listUsers": {
+			name:        "/listUsers",
+			description: "Lists the name and current room of each user",
+			format:      "/listUsers",
+			adminOnly:   false,
+			function:    listUsers,
 		},
 
 		"/help": {
@@ -105,11 +113,18 @@ func switchRoom(u *user, words []string) {
 	}
 }
 
-func list(u *user, _ []string) {
+func listChannels(u *user, _ []string) {
 	//Todo: Send more than one line at a time
 	u.Write("Name\tUsers")
 	for _, r := range roomGroup {
 		u.Write(fmt.Sprintf("%s\t%d", r.name, len(r.users)))
+	}
+}
+
+func listUsers(u *user, _ []string) {
+	u.Write("Name\tRoom")
+	for _, usr := range userGroup {
+		u.Writef("%s\t%s", usr.uName, usr.currentRoom)
 	}
 }
 
@@ -126,5 +141,4 @@ func help(u *user, _ []string) {
 	if err != nil {
 		log.Println("Error sending data to user: ", err.Error())
 	}
-
 }
