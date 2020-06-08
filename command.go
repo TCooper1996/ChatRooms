@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"strings"
+	"sync/atomic"
 )
 
 type command struct {
@@ -64,16 +66,20 @@ func all(_ *user, words []string) {
 }
 
 func create(u *user, words []string) {
+	//Fail if incorrect invocation format
 	if len(words) != 2 {
 		u.Write(fmt.Sprintf("Invalid format. Format is: \n%s.", commandMap[words[0]].format))
-		return
-	}
-
-	if _, exists := roomGroup[words[1]]; exists {
+		//Fail if room limit reached
+	} else if roomCounter > roomLimit {
+		u.Write(fmt.Sprintf("Maximum number of rooms (%d) reached.", roomCounter))
+		//Fail if room exists
+	} else if _, exists := roomGroup[words[1]]; exists {
 		u.Write("Room already exists.")
+		//Success
 	} else {
 		r := newRoom(words[1], u.uName)
 		roomGroup[words[1]] = &r
+		atomic.AddUint32(&roomCounter, 1)
 	}
 }
 
@@ -116,5 +122,9 @@ func help(u *user, _ []string) {
 	}
 
 	bytes := []byte(str.String())
-	u.connection.Write(bytes)
+	_, err := u.connection.Write(bytes)
+	if err != nil {
+		log.Println("Error sending data to user: ", err.Error())
+	}
+
 }

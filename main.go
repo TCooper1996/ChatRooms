@@ -5,96 +5,71 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"path"
 	"strings"
 )
 
-const userLimit = 16
 const privateMessageLimit = 16
-const messageChannelLimit = 32
-const chatHistoryThreshold = 32
-const admin = "admin"
-const adminFormatting = "\r%s\n$: "
-const userFormatting = "\r%s\n[%s] %s: "
-
-//var userCounter uint32
+const serverName = "server"
 
 var userGroup map[string]user
 var messageChannel chan message
 var broadcastChannel chan string
 var roomGroup map[string]*room
 var signalChan chan serverSignal
-var currentRoom string
+var logger log.Logger
+var errorsEncountered = false
+var server user
 
 func main() {
-	var connections = make(chan net.Conn)
 	messageChannel = make(chan message, 10)
 	broadcastChannel = make(chan string)
-	//var console = make(chan string)
 	userGroup = make(map[string]user)
 	roomGroup = make(map[string]*room)
 	signalChan = make(chan serverSignal)
-	roomGroup["main"] = &room{name: "main", users: make([]string, 0), chatHistory: make([]string, 0)}
-	currentRoom = "main"
+	roomGroup["main"] = &room{name: "main", users: make([]string, 0)}
 
-	userGroup["admin"] = user{
-		uName:           "admin",
-		uID:             0,
-		connection:      nil,
-		privateMessages: make(chan []string, privateMessageLimit),
-		currentRoom:     "main",
-	}
+	server = newUser(serverName, nil)
 
 	fmt.Println("Starting server")
-
+	initializeLogger()
 	initializeCommands()
-	go ManageConnections(&connections)
-	go userGroup["admin"].ManageUser()
+	go ManageConnections()
+	go userGroup[serverName].ManageUser()
 
 	for {
 		select {
 		case msg := <-broadcastChannel:
 
+			modMsg := fmt.Sprintf("[Server Broadcast]: %s", msg)
 			for _, room := range roomGroup {
-				modMsg := fmt.Sprintf("[Server Broadcast]: %s", msg)
-				adminMessage := formatMessageAdmin(modMsg)
-				logMessage := formatMessageLog(modMsg)
+				cacheMessage(msg, room.name)
 
-				logToFile(room.name, logMessage)
-
-				for _, u := range userGroup {
-					if u.uName == admin {
-						fmt.Print(adminMessage)
-					} else {
-						userMessage := formatMessageUser(modMsg, u.uName)
-						u.connection.Write([]byte(userMessage))
-					}
-				}
+			}
+			for _, u := range userGroup {
+				u.Write(modMsg)
 			}
 
 		case msg := <-messageChannel:
 
 			user := userGroup[msg.username]
 			modMsg := fmt.Sprintf("[%s] %s: %s", user.currentRoom, user.uName, msg.m)
-			adminMessage := formatMessageAdmin(modMsg) //, userMessage, logMessage := formatMessage(modMsg)
-			logMessage := formatMessageLog(modMsg)
 
-			logToFile(msg.room, logMessage)
+			cacheMessage(modMsg, msg.room)
 
 			for _, u := range roomGroup[msg.room].users {
 				if user.uName != u {
-					userMessage := formatMessageUser(modMsg, u)
-					userGroup[u].connection.Write([]byte(userMessage))
+					userGroup[u].Write(modMsg)
 				}
-			}
-
-			if currentRoom == msg.room && user.uName != admin {
-				fmt.Print(adminMessage)
-
 			}
 
 		case sig := <-signalChan:
 			switch sig {
 			case Quit:
+				if errorsEncountered {
+					fmt.Println("Issues were encountered during runtime. See log file.")
+				}
 				return
 			}
 		}
@@ -103,9 +78,9 @@ func main() {
 }
 
 //ManageConnections listens for connections, creates user models, and notifies main thread using cons channel.
-func ManageConnections(cons *chan net.Conn) {
+func ManageConnections() {
 	ln, err := net.Listen("tcp", ":8081")
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -116,10 +91,15 @@ func ManageConnections(cons *chan net.Conn) {
 		}
 		if userCounter >= userLimit {
 			fmt.Printf("Rejecting incoming connection, user limit reached %d", userLimit)
-			con.Close()
+			err = con.Close()
+			if err != nil {
+				log.Println("Error closing connection after max user limit reached:" + err.Error())
+			}
 			continue
 		}
-		fmt.Printf(adminFormatting, "New connection")
+		//fmt.Printf(adminFormatting, "New connection")
+
+		server.Write("New Connection")
 
 		go CreateUser(con)
 	}
@@ -129,46 +109,45 @@ func ManageConnections(cons *chan net.Conn) {
 func CreateUser(con net.Conn) {
 	rd := bufio.NewReader(con)
 
-	con.Write([]byte("Enter a username: "))
+	_, e := con.Write([]byte("Enter a username: "))
+	if e != nil {
+		log.Println("Failed to send data to user: " + e.Error())
+	}
+
 	in, err := rd.ReadString('\n')
 	in = strings.TrimRight(in, "\r\n")
 	if err != nil {
-		log.Fatalln("Error during user creation: " + err.Error())
+		log.Println("Failed to receive input from user: " + err.Error())
 	}
 	user := newUser(in, con)
-	userGroup[in] = user
-	roomGroup["main"].users = append(roomGroup["main"].users, user.uName)
+	//userGroup[in] = user
+	//roomGroup["main"].users = append(roomGroup["main"].users, user.uName)
 	go user.ManageUser()
 }
 
-func formatMessageAdmin(m string) string {
-	return fmt.Sprintf(adminFormatting, m) //, fmt.Sprintf(userFormatting, m) + "[%s] %s: ", fmt.Sprintf(m + string('\n'))
-}
-
-func formatMessageLog(m string) string {
-	return m + string('\n')
-}
-
-func formatMessageUser(m string, user string) string {
-	userStruct := userGroup[user]
-	return fmt.Sprintf(userFormatting, m, userStruct.currentRoom, userStruct.uName)
-}
-
-//logToFile adds the message to the cached history, and if the size of the history is beyond a constant threshold,
-//opens up the file containing the history of the current channel, writes the cached data to it, and empties the cache.
-func logToFile(name string, logMessage string) {
-	room := roomGroup[name]
-	room.chatHistory = append(room.chatHistory, logMessage)
-	room.chatBytes += len([]byte(logMessage))
-	if room.chatBytes >= chatHistoryThreshold {
-		fmt.Printf(adminFormatting, "Writing chat history to disk.")
-		f := openHistoryFile(room.name, true)
-		for _, line := range room.chatHistory {
-			f.WriteString(line)
-		}
-		f.Close()
-		room.chatHistory = make([]string, 0)
-		room.chatBytes = 0
+func cacheMessage(m string, roomName string) {
+	room := roomGroup[roomName]
+	err := room.chatHistory.Push(m)
+	if err != nil {
+		logger.Println("messageQueue.Push() was called with a string that exceeded the maximum.")
+		errorsEncountered = true
 	}
+}
+
+func initializeLogger() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("Error getting cwd while creating logger file: %s", err.Error())
+		return
+	}
+
+	f, err := os.OpenFile(path.Join(cwd, "ChatRooms_logger."), os.O_WRONLY|os.O_CREATE, 0755)
+	if err != nil {
+		fmt.Printf("Error creating logger file: %s", err.Error())
+		return
+	}
+
+	w := bufio.NewWriter(f)
+	logger = *log.New(w, "", log.Lshortfile)
 
 }

@@ -9,6 +9,10 @@ import (
 	"sync/atomic"
 )
 
+const userLimit = 16
+
+var userCounter uint32 = 0
+
 type user struct {
 	uName           string
 	uID             uint32
@@ -18,16 +22,17 @@ type user struct {
 	admin           bool
 }
 
-var userCounter uint32 = 0
-
 func newUser(name string, con net.Conn) user {
 	c := userCounter
 	atomic.AddUint32(&c, 1)
-	return user{uName: name, uID: c, connection: con, privateMessages: make(chan []string), currentRoom: "main"}
+	u := user{uName: name, uID: c, connection: con, privateMessages: make(chan []string), currentRoom: "main"}
+	userGroup[name] = u
+	roomGroup["main"].AddUser(name)
+	return u
 }
 
 func (u user) Write(data string) {
-	if u.uName == admin {
+	if u.uName == serverName {
 		fmt.Printf("\r%s\n[%s] %s: ", data, u.currentRoom, u.uName)
 	} else {
 
@@ -44,15 +49,23 @@ func (u user) Write(data string) {
 
 func (u user) ManageUser() {
 	var reader bufio.Reader
-	if u.uName == admin {
-		fmt.Printf("\r[%s] %s: ", u.currentRoom, u.uName)
-		reader = *bufio.NewReader(os.Stdin)
-	} else {
-		u.connection.Write([]byte(fmt.Sprintf("\r[%s] %s: ", u.currentRoom, u.uName)))
-		reader = *bufio.NewReader(u.connection)
-	}
+	var showPrompt = func() func() {
+
+		if u.uName == serverName {
+			return func() {
+				fmt.Printf("\r[%s] %s: ", u.currentRoom, u.uName)
+				reader = *bufio.NewReader(os.Stdin)
+			}
+		} else {
+			return func() {
+				u.connection.Write([]byte(fmt.Sprintf("\r[%s] %s: ", u.currentRoom, u.uName)))
+				reader = *bufio.NewReader(u.connection)
+			}
+		}
+	}()
 
 	for {
+		showPrompt()
 		text, _ := reader.ReadString('\n')
 		text = strings.TrimRight(text, "\n")
 
@@ -69,7 +82,11 @@ func (u user) ManageUser() {
 				u.Write("Unknown command. Try /help")
 			}
 		} else {
-			messageChannel <- newMessage(text, u.uName, u.currentRoom)
+			if len([]byte(text)) > maxMessageSize {
+				u.Write(fmt.Sprintf("Max message size reached (%d)", maxMessageSize))
+			} else {
+				messageChannel <- newMessage(text, u.uName, u.currentRoom)
+			}
 		}
 
 	}
