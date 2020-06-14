@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 )
@@ -42,21 +43,23 @@ func newUser(name string, con net.Conn) *user {
 	return u
 }
 
-func (u *user) Write(data string) {
-	_, err := u.writer.WriteString(fmt.Sprintf("\r%s\n[%s] %s:", data, u.currentRoom, u.uName))
-	if err := u.writer.Flush(); err != nil {
-		log.Println("Error Flushing: " + err.Error())
+func (u *user) Write(data string, state messageType) {
+	var uState string
+	if autotest {
+		uState = "{" + strconv.Itoa(int(state)) + "}"
+	} else {
+		uState = ""
 	}
-	if err != nil {
-		log.Println("Error while writing to user: " + err.Error())
-	}
+	u.WriteRaw(fmt.Sprintf("\r%s%s\n[%s] %s:", uState, data, u.currentRoom, u.uName))
+
 }
 
-func (u *user) Writef(format string, s ...string) {
-	u.Write(fmt.Sprintf(format, s))
+func (u *user) Writef(format string, state messageType, s ...string) {
+	u.Write(fmt.Sprintf(format, s), state)
 }
 
 func (u *user) WriteRaw(data string) {
+	mutex.Lock()
 	if _, err := u.writer.WriteString(data); err != nil {
 		log.Println("Error writing to user: " + err.Error())
 	}
@@ -64,17 +67,18 @@ func (u *user) WriteRaw(data string) {
 	if err := u.writer.Flush(); err != nil {
 		log.Println("Error flushing: " + err.Error())
 	}
-
+	mutex.Unlock()
 }
 
 func (u *user) WritePrompt() {
-	if _, err := u.writer.WriteString(fmt.Sprintf("\r[%s] %s: ", u.currentRoom, u.uName)); err != nil {
-		log.Println("Error writing user prompt: " + err.Error())
-	}
+	var mType string
 
-	if err := u.writer.Flush(); err != nil {
-		log.Println("Error flushing while writing to user: ", err.Error())
+	if autotest {
+		mType = "{" + strconv.Itoa(int(ConsolePrompt)) + "}"
+	} else {
+		mType = ""
 	}
+	u.WriteRaw(fmt.Sprintf("\r%s[%s] %s: ", mType, u.currentRoom, u.uName))
 
 }
 
@@ -90,16 +94,16 @@ func (u *user) ManageUser() {
 			words := strings.Split(text, " ")
 			if c, exists := commandMap[words[0]]; exists {
 				if c.adminOnly && !u.admin {
-					u.Write("This function is only available to admins.")
+					u.Write("This function is only available to admins.", PrivilegeError)
 				} else {
 					c.function(u, words)
 				}
 			} else {
-				u.Write("Unknown command. Try /help")
+				u.Write("Unknown command. Try /help", UnknownCommandError)
 			}
 		} else {
 			if len([]byte(text)) > maxMessageSize {
-				u.Write(fmt.Sprintf("Max message size reached (%d)", maxMessageSize))
+				u.Write(fmt.Sprintf("Max message size reached (%d)", maxMessageSize), MessageOverflowError)
 			} else {
 				messageChannel <- newMessage(text, u.uName, u.currentRoom)
 			}

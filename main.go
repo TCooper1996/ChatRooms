@@ -7,7 +7,9 @@ import (
 	"net"
 	"os"
 	"path"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 const privateMessageLimit = 16
@@ -21,8 +23,16 @@ var signalChan chan serverSignal
 var logger log.Logger
 var errorsEncountered = false
 var server user
+var autotest bool
+var mutex *sync.Mutex
 
-func main() {
+func startServer() {
+	log.SetFlags(log.Lshortfile)
+	mutex = &sync.Mutex{}
+
+	if len(os.Args) == 2 && os.Args[1] == "-t" {
+		autotest = true
+	}
 	messageChannel = make(chan message, 10)
 	broadcastChannel = make(chan string)
 	userGroup = make(map[string]*user)
@@ -48,7 +58,7 @@ func main() {
 
 			}
 			for _, u := range userGroup {
-				u.Write(modMsg)
+				u.Write(modMsg, ChatMessage)
 			}
 
 		case msg := <-messageChannel:
@@ -60,10 +70,9 @@ func main() {
 
 			for _, u := range roomGroup[msg.room].Range() {
 				if user != u {
-					u.Write(modMsg)
+					u.Write(modMsg, ChatMessage)
 				}
 			}
-
 		case sig := <-signalChan:
 			switch sig {
 			case Quit:
@@ -97,9 +106,8 @@ func ManageConnections() {
 			}
 			continue
 		}
-		//fmt.Printf(adminFormatting, "New connection")
 
-		server.Write("New Connection")
+		server.Write("New Connection", NewConnection)
 
 		go CreateUser(con)
 	}
@@ -109,7 +117,13 @@ func ManageConnections() {
 func CreateUser(con net.Conn) {
 	rd := bufio.NewReader(con)
 
-	_, e := con.Write([]byte("Enter a username: "))
+	var mType string
+	if autotest {
+		mType = "{" + strconv.Itoa(int(NamePrompt)) + "}"
+	} else {
+		mType = ""
+	}
+	_, e := con.Write([]byte(mType + "Enter a username: "))
 	if e != nil {
 		log.Println("Failed to send data to user: " + e.Error())
 	}

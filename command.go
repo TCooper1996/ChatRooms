@@ -75,25 +75,25 @@ func all(_ *user, words []string) {
 func create(u *user, words []string) {
 	//Fail if incorrect invocation format
 	if len(words) != 2 {
-		u.Write(fmt.Sprintf("Invalid format. Format is: \n%s.", commandMap[words[0]].format))
+		u.Writef("Invalid format. Format is: \n%s.", BadFormatError, commandMap[words[0]].format)
 		//Fail if room limit reached
 	} else if roomCounter > roomLimit {
-		u.Write(fmt.Sprintf("Maximum number of rooms (%d) reached.", roomCounter))
+		u.Writef("Maximum number of rooms (%s) reached.", RoomLimitReachedError, string(roomCounter))
 		//Fail if room exists
 	} else if _, exists := roomGroup[words[1]]; exists {
-		u.Write("Room already exists.")
+		u.Write("Room already exists.", RoomAlreadyExistsError)
 		//Success
 	} else {
 		r := newRoom(words[1], u.uName)
 		roomGroup[words[1]] = &r
 		atomic.AddUint32(&roomCounter, 1)
-		u.Writef("Room %s created.", words[1])
+		u.Writef("Room %s created.", RoomCreated, words[1])
 	}
 }
 
 func switchRoom(u *user, words []string) {
 	if len(words) != 2 {
-		u.Write(fmt.Sprintf("Invalid format. Format is: \n%s.", commandMap[words[0]].format))
+		u.Write(fmt.Sprintf("Invalid format. Format is: \n%s.", commandMap[words[0]].format), BadFormatError)
 		return
 	}
 
@@ -109,22 +109,22 @@ func switchRoom(u *user, words []string) {
 		u.WritePrompt()
 
 	} else {
-		u.Write("Room does not exist.")
+		u.Write("Room does not exist.", Room404Error)
 	}
 }
 
 func listChannels(u *user, _ []string) {
 	//Todo: Send more than one line at a time
-	u.Write("Name\tUsers")
+	u.Write("Name\tUsers", RoomListing)
 	for _, r := range roomGroup {
-		u.Write(fmt.Sprintf("%s\t%d", r.name, len(r.users)))
+		u.Writef("%s\t%d", RoomListing, r.name, string(len(r.users)))
 	}
 }
 
 func listUsers(u *user, _ []string) {
-	u.Write("Name\tRoom")
+	u.Write("Name\tRoom", UserListing)
 	for _, usr := range userGroup {
-		u.Writef("%s\t%s", usr.uName, usr.currentRoom)
+		u.Writef("%s\t%s", UserListing, usr.uName, usr.currentRoom)
 	}
 }
 
