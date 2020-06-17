@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
 )
@@ -46,7 +45,7 @@ func newUser(name string, con net.Conn) *user {
 func (u *user) Write(data string, state messageType) {
 	var uState string
 	if autotest {
-		uState = "{" + strconv.Itoa(int(state)) + "}"
+		uState = "{" + state.toString() + "}"
 	} else {
 		uState = ""
 	}
@@ -74,7 +73,7 @@ func (u *user) WritePrompt() {
 	var mType string
 
 	if autotest {
-		mType = "{" + strconv.Itoa(int(ConsolePrompt)) + "}"
+		mType = "{" + ConsolePrompt.toString() + "}"
 	} else {
 		mType = ""
 	}

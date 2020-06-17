@@ -1,5 +1,7 @@
 package main
 
+import "strconv"
+
 type messageType uint64
 
 const (
@@ -16,5 +18,10 @@ const (
 	RoomCreated
 	RoomLimitReachedError
 	RoomListing
+	RoomChanged
 	UserListing
 )
+
+func (m messageType) toString() string {
+	return strconv.Itoa(int(m))
+}

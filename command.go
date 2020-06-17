@@ -75,7 +75,7 @@ func all(_ *user, words []string) {
 func create(u *user, words []string) {
 	//Fail if incorrect invocation format
 	if len(words) != 2 {
-		u.Writef("Invalid format. Format is: \n%s.", BadFormatError, commandMap[words[0]].format)
+		u.Writef("Invalid format. Format is: %s.", BadFormatError, commandMap[words[0]].format)
 		//Fail if room limit reached
 	} else if roomCounter > roomLimit {
 		u.Writef("Maximum number of rooms (%s) reached.", RoomLimitReachedError, string(roomCounter))
@@ -100,13 +100,13 @@ func switchRoom(u *user, words []string) {
 	if r, exists := roomGroup[words[1]]; exists {
 		r.AddUser(u.uName)
 
-		u.WriteRaw(fmt.Sprintf("Entering room %s\n", u.currentRoom))
+		u.Writef("Entering room %s\n", RoomChanged, u.currentRoom)
 
 		//todo: Consider sending more than just one line per packet
 		for _, m := range r.chatHistory.Range() {
 			u.WriteRaw(m)
 		}
-		u.WritePrompt()
+		//u.WritePrompt()
 
 	} else {
 		u.Write("Room does not exist.", Room404Error)
